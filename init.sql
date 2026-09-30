@@ -6,7 +6,8 @@
 
 -- 1. Таблица соц-дем данных клиентов
 CREATE TABLE IF NOT EXISTS client_sociodem (
-    client_id        BIGINT PRIMARY KEY,
+    clientbase        VARCHAR(6)      PRIMARY KEY
+                      CHECK (clientbase ~ '^[A-Za-z0-9]{6}$'),  -- ровно 6 символов: латиница и цифры
     gender            VARCHAR(1)      NOT NULL,          -- 'M' / 'F'
     birth_date        DATE            NOT NULL,
     age               SMALLINT        NOT NULL,
@@ -23,7 +24,7 @@ CREATE TABLE IF NOT EXISTS client_sociodem (
 -- 2. Таблица транзакций клиентов
 CREATE TABLE IF NOT EXISTS client_transactions (
     transaction_id    BIGINT PRIMARY KEY,
-    client_id         BIGINT          NOT NULL REFERENCES client_sociodem(client_id),
+    clientbase        VARCHAR(6)      NOT NULL REFERENCES client_sociodem(clientbase),
     transaction_date  TIMESTAMP       NOT NULL,
     amount            NUMERIC(14,2)   NOT NULL,
     currency          VARCHAR(3)      NOT NULL DEFAULT 'BYN',
@@ -33,15 +34,15 @@ CREATE TABLE IF NOT EXISTS client_transactions (
     transaction_type  VARCHAR(20)     NOT NULL            -- PURCHASE / WITHDRAWAL / TRANSFER / DEPOSIT
 );
 
-CREATE INDEX IF NOT EXISTS idx_transactions_client_id
-    ON client_transactions(client_id);
+CREATE INDEX IF NOT EXISTS idx_transactions_clientbase
+    ON client_transactions(clientbase);
 CREATE INDEX IF NOT EXISTS idx_transactions_date
     ON client_transactions(transaction_date);
 
 -- 3. Таблица продуктового владения клиентов
 CREATE TABLE IF NOT EXISTS client_products (
     product_id        BIGINT PRIMARY KEY,
-    client_id         BIGINT          NOT NULL REFERENCES client_sociodem(client_id),
+    clientbase        VARCHAR(6)      NOT NULL REFERENCES client_sociodem(clientbase),
     product_type      VARCHAR(30)     NOT NULL,           -- CARD / DEPOSIT / LOAN / MORTGAGE / INVESTMENT
     product_name      VARCHAR(100)    NOT NULL,
     open_date         DATE            NOT NULL,
@@ -50,8 +51,8 @@ CREATE TABLE IF NOT EXISTS client_products (
     balance            NUMERIC(14,2)  NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_products_client_id
-    ON client_products(client_id);
+CREATE INDEX IF NOT EXISTS idx_products_clientbase
+    ON client_products(clientbase);
 
 -- ==========================================================
 -- Read-only пользователь

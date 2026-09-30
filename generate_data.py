@@ -7,7 +7,8 @@
   - client_transactions   (несколько строк на клиента)
   - client_products       (несколько строк на клиента)
 
-Все клиенты связаны полем client_id.
+Все клиенты связаны полем clientbase — VARCHAR(6), ровно 6 символов
+(латинские буквы и цифры), например 'K7Q2ZA'.
 
 Использование:
     python generate_data.py --n-clients 100
@@ -77,11 +78,31 @@ PRODUCT_CATALOG = {
 PRODUCT_STATUS = ["ACTIVE", "CLOSED", "BLOCKED"]
 PRODUCT_STATUS_WEIGHTS = [0.75, 0.20, 0.05]
 
+# clientbase: ровно 6 символов из латинских букв и цифр.
+# Порядковый номер клиента переводится в уникальный код через аффинную
+# перестановку по модулю 36^6 (множитель взаимно прост с 36^6), поэтому коды
+# не повторяются, выглядят случайными и не требуют хранения в памяти.
+CLIENTBASE_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+CLIENTBASE_LEN = 6
+CLIENTBASE_SPACE = len(CLIENTBASE_ALPHABET) ** CLIENTBASE_LEN
+CLIENTBASE_MULT = 1_000_003
+CLIENTBASE_SHIFT = 123_456_789
 
-def gen_sociodem_batch(client_ids: np.ndarray):
+
+def make_clientbase(n: int) -> str:
+    x = (int(n) * CLIENTBASE_MULT + CLIENTBASE_SHIFT) % CLIENTBASE_SPACE
+    base = len(CLIENTBASE_ALPHABET)
+    chars = []
+    for _ in range(CLIENTBASE_LEN):
+        x, rem = divmod(x, base)
+        chars.append(CLIENTBASE_ALPHABET[rem])
+    return "".join(reversed(chars))
+
+
+def gen_sociodem_batch(clientbases: list):
     rows = []
     today = date.today()
-    for cid in client_ids:
+    for cb in clientbases:
         gender = random.choice(["M", "F"])
         age = int(np.clip(np.random.normal(42, 14), 18, 85))
         birth_date = today - timedelta(days=age * 365 + random.randint(0, 364))
@@ -94,13 +115,13 @@ def gen_sociodem_batch(client_ids: np.ndarray):
         base_income = {"LOW": 700, "MEDIUM": 1500, "HIGH": 3500, "PREMIUM": 8000}[income_segment]
         monthly_income = round(max(300, np.random.normal(base_income, base_income * 0.25)), 2)
         rows.append((
-            int(cid), gender, birth_date.isoformat(), age, region, city,
+            cb, gender, birth_date.isoformat(), age, region, city,
             education, marital, employment, income_segment, monthly_income,
         ))
     return rows
 
 
-def gen_transactions_for_client(cid: int, tx_id_start: int, n_tx: int):
+def gen_transactions_for_client(cb: str, tx_id_start: int, n_tx: int):
     rows = []
     today = datetime.now()
     for i in range(n_tx):
@@ -119,13 +140,13 @@ def gen_transactions_for_client(cid: int, tx_id_start: int, n_tx: int):
             amount = -round(abs(np.random.lognormal(3.5, 1.0)), 2)
         channel = random.choices(CHANNELS, weights=CHANNEL_WEIGHTS)[0]
         rows.append((
-            tx_id_start + i, cid, tx_date.isoformat(sep=" "), amount,
+            tx_id_start + i, cb, tx_date.isoformat(sep=" "), amount,
             currency, mcc, category, channel, tx_type,
         ))
     return rows
 
 
-def gen_products_for_client(cid: int, product_id_start: int, n_products: int):
+def gen_products_for_client(cb: str, product_id_start: int, n_products: int):
     rows = []
     today = date.today()
     chosen_types = random.sample(list(PRODUCT_CATALOG.keys()),
@@ -139,7 +160,7 @@ def gen_products_for_client(cid: int, product_id_start: int, n_products: int):
             close_date = (open_date + timedelta(days=random.randint(30, 365 * 3))).isoformat()
         balance = round(abs(np.random.lognormal(6.5, 1.3)), 2) if status != "CLOSED" else 0.0
         rows.append((
-            product_id_start + i, cid, ptype, name, open_date.isoformat(),
+            product_id_start + i, cb, ptype, name, open_date.isoformat(),
             close_date, status, balance,
         ))
     return rows
@@ -193,37 +214,37 @@ def main():
 
     for batch_start in range(0, args.n_clients, args.batch_size):
         batch_end = min(batch_start + args.batch_size, args.n_clients)
-        client_ids = np.arange(batch_start + 1, batch_end + 1)
+        clientbases = [make_clientbase(n) for n in range(batch_start, batch_end)]
 
-        sociodem_rows = gen_sociodem_batch(client_ids)
+        sociodem_rows = gen_sociodem_batch(clientbases)
         copy_rows(cur, "client_sociodem", [
-            "client_id", "gender", "birth_date", "age", "region", "city",
+            "clientbase", "gender", "birth_date", "age", "region", "city",
             "education", "marital_status", "employment_status",
             "income_segment", "monthly_income",
         ], sociodem_rows)
 
         tx_rows_all = []
         product_rows_all = []
-        for cid in client_ids:
+        for cb in clientbases:
             n_tx = random.randint(args.min_tx, args.max_tx)
-            tx_rows = gen_transactions_for_client(int(cid), tx_id_counter, n_tx)
+            tx_rows = gen_transactions_for_client(cb, tx_id_counter, n_tx)
             tx_id_counter += n_tx
             tx_rows_all.extend(tx_rows)
 
             n_products = random.randint(args.min_products, args.max_products)
-            product_rows = gen_products_for_client(int(cid), product_id_counter, n_products)
+            product_rows = gen_products_for_client(cb, product_id_counter, n_products)
             product_id_counter += len(product_rows)
             product_rows_all.extend(product_rows)
 
         if tx_rows_all:
             copy_rows(cur, "client_transactions", [
-                "transaction_id", "client_id", "transaction_date", "amount",
+                "transaction_id", "clientbase", "transaction_date", "amount",
                 "currency", "mcc_code", "merchant_category", "channel", "transaction_type",
             ], tx_rows_all)
 
         if product_rows_all:
             copy_rows(cur, "client_products", [
-                "product_id", "client_id", "product_type", "product_name",
+                "product_id", "clientbase", "product_type", "product_name",
                 "open_date", "close_date", "status", "balance",
             ], product_rows_all)
 
